@@ -1,0 +1,138 @@
+#include <iostream>
+#include <string>
+using namespace std;
+
+class BuildingTask {
+private:
+
+    string taskName;        // наименование работы
+    string responsiblePerson;     // ответственный
+    int plannedDays;        // плановый срок (количество дней)
+    int PercentOfCompletion;  // процент выполнения 
+
+public:
+    // Конструктор с параметрами (принимает значения для всех полей)
+    BuildingTask(string name, string resp, int days, int percent) {
+        taskName = name;
+        responsiblePerson = resp;
+
+        if (days > 0) {
+            plannedDays = days;
+        } else {
+            plannedDays = 1; 
+            cout << "Срок выполнения не может быть отрицательным. Установлен 1 день." << endl;
+        }
+
+        if (percent >= 0 and percent <= 100) {
+            PercentOfCompletion = percent;
+        } else {
+            PercentOfCompletion = 0;
+            cout << "Процент выполнения не может быт отрицательным или больше 100. Установлен 0." << endl;
+        }
+    }
+
+    // Конструктор по умолчанию
+    BuildingTask() {
+        taskName = "Не указано";
+        responsiblePerson = "Не назначен";
+        plannedDays = 1;
+        PercentOfCompletion = 0;
+    }
+
+    // Деструктор
+    ~BuildingTask() {
+        cout << "Задача \"" << taskName << "\" удалена из плана." << endl;
+    }
+
+    //Сеттеры с валидацией
+
+    // для наименования работы
+    void setTaskName(string name) {
+        if (!name.empty()) {
+            taskName = name;
+        } else {
+            cout << "Название работы не может быть пустым полем." << endl;
+        }
+    }
+
+    // для процента выполнения 
+    void setCompletionPercent(int percent) {
+        if (percent >= 0 && percent <= 100) {
+            PercentOfCompletion = percent;
+        } else {
+            cout << "Ошибка: процент выполнения должен быть от 0 до 100." << endl;
+        }
+    }
+
+    // Геттеры
+
+    // для наименования работы
+    string getTaskName() {
+        return taskName;
+    }
+
+    // для процента выполнения
+    int getCompletionPercent() {
+        return PercentOfCompletion;
+    }
+
+    // Доп.методы
+
+    // Обновление прогресса выполнения
+    void updateProgress(int newPercent) {
+        if (newPercent > PercentOfCompletion) {
+            setCompletionPercent(newPercent); 
+            cout << "Обновление прогресса. ";
+        } else if (newPercent < PercentOfCompletion) {
+            cout << "Нельзя откатить прогресс назад. Отменена." << endl;
+        } else {
+            cout << "Прогресс равен " << newPercent << "%." << endl;
+        }
+    }
+
+    // Проверка завершённости работы
+    bool isCompleted() {
+        return PercentOfCompletion == 100;
+    }
+
+    // Вывод информации
+    void printInfo() {
+        cout << "Работа: " << taskName << endl;
+        cout << "Ответственный: " << responsiblePerson << endl;
+        cout << "Плановый срок: " << plannedDays << " дней" << endl;
+        cout << "Прогресс: " << PercentOfCompletion << "%" << endl;
+        cout << "Состояние: " << (isCompleted() ? "Завершена" : "В работе") << endl;
+    }
+};
+
+int main() {
+    setlocale(0, "Russian");
+
+    // 1. Создание объекта конструктором с параметрами
+    cout << "Создание объекта с параметрами (acc1)" << endl;
+    BuildingTask task1("Облицовка фасада дома", "Иванов И.И.", 5, 10);
+    task1.printInfo();
+
+    // Демонстрация работф
+    //обновление прогресса
+    task1.updateProgress(70); 
+    task1.printInfo();
+
+    // Откатка прогресса 
+    task1.updateProgress(20);
+    
+    // Завершение задачи
+    task1.updateProgress(100);
+    task1.printInfo();
+
+    // Проверка завершенности
+    if (task1.isCompleted()) {
+        cout << "Задача \""<< task1.getTaskName() << "\" успешно завершена!" << endl;
+    }
+
+    // Демонстрация работы сеттера с валидацией
+    task1.setCompletionPercent(200); 
+
+    return 0;
+}
+    
