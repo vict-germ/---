@@ -1,0 +1,943 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <iomanip>
+#include <ctime>
+#include <sstream>
+#include <limits>
+
+using namespace std;
+
+// ======================== БАЗОВЫЙ КЛАСС «ТОВАР» ========================
+class Product
+{
+protected:
+    int id;                 // уникальный ID товара
+    string name;            // наименование
+    double price;           // цена за единицу
+    int quantity;           // количество на складе
+    static int nextId;      // статический счетчик для генерации ID
+
+public:
+    // Конструкторы
+    Product() : id(++nextId), name(""), price(0.0), quantity(0) {}
+    
+    Product(const string& n, double p, int q)
+        : id(++nextId), name(n), price(p), quantity(q)
+    {
+        if (price < 0) price = 0;
+        if (quantity < 0) quantity = 0;
+    }
+    
+    // Копирующий конструктор
+    Product(const Product& other)
+        : id(++nextId), name(other.name), price(other.price), quantity(other.quantity) {}
+    
+    // Виртуальный деструктор
+    virtual ~Product()
+    {
+        cout << "Товар \"" << name << "\" (ID:" << id << ") удалён из системы." << endl;
+    }
+    
+    // Геттеры
+    int getId() const { return id; }
+    string getName() const { return name; }
+    double getPrice() const { return price; }
+    int getQuantity() const { return quantity; }
+    
+    // Сеттеры с валидацией
+    void setPrice(double p)
+    {
+        if (p >= 0)
+            price = p;
+        else
+            cout << "Ошибка: цена не может быть отрицательной!" << endl;
+    }
+    
+    void setQuantity(int q)
+    {
+        if (q >= 0)
+            quantity = q;
+        else
+            cout << "Ошибка: количество не может быть отрицательным!" << endl;
+    }
+    
+    void setName(const string& n) { name = n; }
+    
+    // Виртуальные методы (полиморфизм)
+    virtual void sell(int amount)
+    {
+        if (amount <= 0)
+        {
+            cout << "Ошибка: количество для продажи должно быть положительным!" << endl;
+            return;
+        }
+        if (amount > quantity)
+        {
+            cout << "Ошибка: недостаточно товара на складе! Доступно: " << quantity << endl;
+            return;
+        }
+        quantity -= amount;
+        cout << "✓ Продано " << amount << " ед. товара \"" << name << "\". Осталось: " << quantity << endl;
+    }
+    
+    virtual void restock(int amount)
+    {
+        if (amount <= 0)
+        {
+            cout << "Ошибка: количество пополнения должно быть положительным!" << endl;
+            return;
+        }
+        quantity += amount;
+        cout << "✓ Поступление " << amount << " ед. товара \"" << name << "\". Теперь: " << quantity << endl;
+    }
+    
+    virtual void printInfo() const
+    {
+        cout << "┌─────────────────────────────────────────────────" << endl;
+        cout << "│ ID: " << id << " | " << name << endl;
+        cout << "│ Цена: " << fixed << setprecision(2) << price << " руб." << endl;
+        cout << "│ Кол-во: " << quantity << " шт." << endl;
+        cout << "└─────────────────────────────────────────────────" << endl;
+    }
+    
+    // Дружественный класс
+    friend class Warehouse;
+};
+
+int Product::nextId = 0;
+
+// ========== ВИРТУАЛЬНЫЙ БАЗОВЫЙ КЛАСС «СКОРОПОРТЯЩИЙСЯ» ==========
+class Perishable
+{
+protected:
+    time_t expirationDate;   // срок годности (в формате времени Unix)
+    string expirationDateStr; // строковое представление для ввода/вывода
+    
+public:
+    Perishable() : expirationDate(0), expirationDateStr("") {}
+    
+    Perishable(const string& expDateStr) : expirationDateStr(expDateStr)
+    {
+        setExpirationDateFromString(expDateStr);
+    }
+    
+    virtual ~Perishable() {}
+    
+    void setExpirationDateFromString(const string& dateStr)
+    {
+        expirationDateStr = dateStr;
+        // Простой парсинг даты в формате ДД.ММ.ГГГГ
+        struct tm tm = {0};
+        int day, month, year;
+        char sep1, sep2;
+        stringstream ss(dateStr);
+        if (ss >> day >> sep1 >> month >> sep2 >> year)
+        {
+            if (sep1 == '.' && sep2 == '.')
+            {
+                tm.tm_mday = day;
+                tm.tm_mon = month - 1;
+                tm.tm_year = year - 1900;
+                expirationDate = mktime(&tm);
+            }
+        }
+    }
+    
+    time_t getExpirationDate() const { return expirationDate; }
+    string getExpirationDateStr() const { return expirationDateStr; }
+    
+    // Проверка на просрочку
+    bool isExpired() const
+    {
+        time_t now = time(nullptr);
+        return (difftime(now, expirationDate) > 0);
+    }
+    
+    // Уникальный метод
+    virtual void checkFreshness() const
+    {
+        time_t now = time(nullptr);
+        double daysLeft = difftime(expirationDate, now) / (60 * 60 * 24);
+        if (expirationDate == 0 || daysLeft < 0)
+            cout << "     [ПРОСРОЧЕН!]" << endl;
+        else if (daysLeft < 3)
+            cout << "     [Срок годности истекает через " << (int)daysLeft << " дня(ей)!]" << endl;
+        else
+            cout << "     [Свежий товар, осталось " << (int)daysLeft << " дней]" << endl;
+    }
+};
+
+// ========== ВИРТУАЛЬНЫЙ БАЗОВЫЙ КЛАСС «УЦЕНЯЕМЫЙ» ==========
+class Discountable
+{
+protected:
+    double discountPercent;   // процент скидки
+    
+public:
+    Discountable() : discountPercent(0.0) {}
+    
+    Discountable(double disc) : discountPercent(disc)
+    {
+        if (discountPercent < 0) discountPercent = 0;
+        if (discountPercent > 90) discountPercent = 90;
+    }
+    
+    virtual ~Discountable() {}
+    
+    void setDiscount(double disc)
+    {
+        if (disc >= 0 && disc <= 90)
+            discountPercent = disc;
+        else
+            cout << "Ошибка: скидка должна быть от 0 до 90%" << endl;
+    }
+    
+    double getDiscount() const { return discountPercent; }
+    
+    // Уникальный метод
+    double getDiscountedPrice(double originalPrice) const
+    {
+        return originalPrice * (100.0 - discountPercent) / 100.0;
+    }
+    
+    void applyDiscount(double disc)
+    {
+        setDiscount(disc);
+        cout << "✓ Установлена скидка " << discountPercent << "%" << endl;
+    }
+};
+
+// ========== КЛАСС «БАКАЛЕЯ» (МНОЖЕСТВЕННОЕ НАСЛЕДОВАНИЕ) ==========
+class Groceries : public Product, public Perishable, public Discountable
+{
+private:
+    string packageType;   // тип упаковки
+    string category;      // категория товара (крупы, макароны и т.д.)
+    
+public:
+    // Конструктор по умолчанию
+    Groceries() : Product(), Perishable(), Discountable(), packageType(""), category("") {}
+    
+    // Конструктор с параметрами
+    Groceries(const string& n, double p, int q, const string& expDate, double disc, 
+              const string& pack, const string& cat)
+        : Product(n, p, q), Perishable(expDate), Discountable(disc), 
+          packageType(pack), category(cat) {}
+    
+    ~Groceries() override
+    {
+        cout << "Бакалейный товар \"" << getName() << "\" удалён." << endl;
+    }
+    
+    // Переопределённые методы
+    void sell(int amount) override
+    {
+        if (isExpired())
+        {
+            cout << "  Ошибка: товар \"" << getName() << "\" просрочен! Продажа невозможна." << endl;
+            return;
+        }
+        Product::sell(amount);
+    }
+    
+    void printInfo() const override
+    {
+        cout << "┌─────────────────────────────────────────────────" << endl;
+        cout << "│ [БАКАЛЕЯ] ID:" << getId() << " | " << getName() << endl;
+        cout << "│ Категория: " << category << " | Упаковка: " << packageType << endl;
+        cout << "│ Цена: " << fixed << setprecision(2) << getPrice() << " руб.";
+        if (discountPercent > 0)
+            cout << " (со скидкой: " << getDiscountedPrice(getPrice()) << " руб.)";
+        cout << endl;
+        cout << "│ Кол-во: " << getQuantity() << " шт." << endl;
+        cout << "│ Срок годности: " << expirationDateStr << endl;
+        checkFreshness();
+        cout << "└─────────────────────────────────────────────────" << endl;
+    }
+    
+    // Уникальные методы
+    void applySeasonalDiscount(double extraPercent)
+    {
+        if (extraPercent < 0 || extraPercent > 50)
+        {
+            cout << "Ошибка: сезонная скидка должна быть от 0 до 50%" << endl;
+            return;
+        }
+        discountPercent += extraPercent;
+        if (discountPercent > 90) discountPercent = 90;
+        cout << "  Применена сезонная скидка! Общая скидка: " << discountPercent << "%" << endl;
+    }
+    
+    void changePackageType(const string& newType)
+    {
+        packageType = newType;
+        cout << "  Тип упаковки изменён на: " << packageType << endl;
+    }
+    
+    // Геттеры для ввода
+    static void inputGroceries(Groceries& g)
+    {
+        string name, expDate, pack, cat;
+        double price, disc;
+        int quantity;
+        
+        cin.ignore();
+        cout << "Введите наименование товара: ";
+        getline(cin, name);
+        
+        cout << "Введите цену: ";
+        cin >> price;
+        
+        cout << "Введите количество: ";
+        cin >> quantity;
+        
+        cout << "Введите срок годности (ДД.ММ.ГГГГ): ";
+        cin >> expDate;
+        
+        cout << "Введите скидку (0-90): ";
+        cin >> disc;
+        
+        cin.ignore();
+        cout << "Введите тип упаковки: ";
+        getline(cin, pack);
+        
+        cout << "Введите категорию (крупы, макароны, консервы и т.д.): ";
+        getline(cin, cat);
+        
+        g = Groceries(name, price, quantity, expDate, disc, pack, cat);
+    }
+    
+    friend class Warehouse;
+};
+
+// ========== КЛАСС «МОЛОЧНЫЙ ПРОДУКТ» (ОДИНОЧНОЕ НАСЛЕДОВАНИЕ ОТ PRODUCT И PERISHABLE) ==========
+class DairyProduct : public Product, public Perishable
+{
+private:
+    double fatContent;      // жирность
+    string manufacturer;    // производитель
+    static int nextId;
+    
+public:
+    // Конструкторы
+    DairyProduct() : Product(), Perishable(), fatContent(0.0), manufacturer("") {}
+    
+    DairyProduct(const string& n, double p, int q, const string& expDate, 
+                 double fat, const string& manuf)
+        : Product(n, p, q), Perishable(expDate), fatContent(fat), manufacturer(manuf)
+    {
+        if (fatContent < 0) fatContent = 0;
+        if (fatContent > 50) fatContent = 50;
+    }
+    
+    ~DairyProduct()
+    {
+        cout << "Молочный продукт \"" << getName() << "\" удалён." << endl;
+    }
+    
+    // Геттеры
+    double getFatContent() const { return fatContent; }
+    string getManufacturer() const { return manufacturer; }
+    
+    // Уникальные методы
+    void applyMarkdown(double percent)
+    {
+        if (percent < 0 || percent > 70)
+        {
+            cout << "Ошибка: уценка должна быть от 0 до 70%" << endl;
+            return;
+        }
+        setPrice(getPrice() * (100.0 - percent) / 100.0);
+        cout << "  Применена уценка " << percent << "%. Новая цена: " << fixed << setprecision(2) << getPrice() << " руб." << endl;
+    }
+    
+    void changeManufacturer(const string& newManuf)
+    {
+        manufacturer = newManuf;
+        cout << "  Производитель изменён на: " << manufacturer << endl;
+    }
+    
+    void printInfo() const override
+    {
+        cout << "┌─────────────────────────────────────────────────" << endl;
+        cout << "│ [МОЛОЧНЫЙ] ID:" << getId() << " | " << getName() << endl;
+        cout << "│ Производитель: " << manufacturer << " | Жирность: " << fatContent << "%" << endl;
+        cout << "│ Цена: " << fixed << setprecision(2) << getPrice() << " руб." << endl;
+        cout << "│ Кол-во: " << getQuantity() << " шт." << endl;
+        cout << "│ Срок годности: " << getExpirationDateStr() << endl;
+        checkFreshness();
+        cout << "└─────────────────────────────────────────────────" << endl;
+    }
+    
+    void sell(int amount) override
+    {
+        if (amount <= 0)
+        {
+            cout << "Ошибка: количество для продажи должно быть положительным!" << endl;
+            return;
+        }
+        if (isExpired())
+        {
+            cout << "  Ошибка: молочный продукт \"" << getName() << "\" просрочен!" << endl;
+            return;
+        }
+        if (amount > getQuantity())
+        {
+            cout << "Ошибка: недостаточно товара! Доступно: " << getQuantity() << endl;
+            return;
+        }
+        setQuantity(getQuantity() - amount);
+        cout << "  Продано " << amount << " ед. молочного продукта \"" << getName() << "\". Осталось: " << getQuantity() << endl;
+    }
+    
+    void restock(int amount) override
+    {
+        if (amount <= 0)
+        {
+            cout << "Ошибка: количество пополнения должно быть положительным!" << endl;
+            return;
+        }
+        setQuantity(getQuantity() + amount);
+        cout << "  Поступление " << amount << " ед. \"" << getName() << "\". Теперь: " << getQuantity() << endl;
+    }
+
+
+    
+    // Статический метод для ввода
+    static void inputDairyProduct(DairyProduct& d)
+    {
+        string name, expDate, manuf;
+        double price, fat;
+        int quantity;
+        
+        cin.ignore();
+        cout << "Введите наименование товара: ";
+        getline(cin, name);
+        
+        cout << "Введите цену: ";
+        cin >> price;
+        
+        cout << "Введите количество: ";
+        cin >> quantity;
+        
+        cout << "Введите срок годности (ДД.ММ.ГГГГ): ";
+        cin >> expDate;
+        
+        cout << "Введите жирность (%): ";
+        cin >> fat;
+        
+        cin.ignore();
+        cout << "Введите производителя: ";
+        getline(cin, manuf);
+        
+        d = DairyProduct(name, price, quantity, expDate, fat, manuf);
+    }
+    
+    friend class Warehouse;
+};
+
+int DairyProduct::nextId = 200;
+
+// ======================== КЛАСС «СКЛАД» ========================
+class Warehouse
+{
+private:
+    vector<Product*> products;
+    vector<Groceries*> groceriesList;
+    vector<DairyProduct*> dairyList;
+    
+public:
+    Warehouse() {}
+    
+    ~Warehouse()
+    {
+        for (auto p : products)
+            delete p;
+        products.clear();
+        groceriesList.clear();
+        dairyList.clear();
+    }
+    
+    // Добавление готового товара (для начальной загрузки)
+    void addProduct(Product* p)
+    {
+        products.push_back(p);
+        
+        // Если это бакалейный товар, добавим в отдельный список
+        Groceries* g = dynamic_cast<Groceries*>(p);
+        if (g) groceriesList.push_back(g);
+        
+        // Если это молочный продукт, добавим в отдельный список
+        DairyProduct* d = dynamic_cast<DairyProduct*>(p);
+        if (d) dairyList.push_back(d);
+        
+        cout << "  Товар \"" << p->getName() << "\" добавлен на склад." << endl;
+    }
+    
+    // Добавление бакалейного товара через ввод с клавиатуры
+    void addGroceries()
+    {
+        Groceries* g = new Groceries();
+        Groceries::inputGroceries(*g);
+        products.push_back(g);
+        groceriesList.push_back(g);
+        cout << "\n  Бакалейный товар успешно добавлен! ID: " << g->getId() << endl;
+    }
+    
+    void addDairyProduct()
+    {
+        DairyProduct* d = new DairyProduct();
+        DairyProduct::inputDairyProduct(*d);
+        products.push_back(d);
+        dairyList.push_back(d);
+        cout << "\n  Молочный продукт успешно добавлен! ID: " << d->getId() << endl;
+    }
+    
+    // Поиск по ID
+    Product* findById(int id)
+    {
+        for (auto p : products)
+        {
+            if (p->getId() == id)
+                return p;
+        }
+        return nullptr;
+    }
+    
+    // Поиск по имени
+    Product* findByName(const string& name)
+    {
+        for (auto p : products)
+        {
+            if (p->getName() == name)
+                return p;
+        }
+        return nullptr;
+    }
+    
+    // Продажа товара
+    void sellProduct()
+    {
+        int id, amount;
+        cout << "Введите ID товара: ";
+        cin >> id;
+        
+        Product* p = findById(id);
+        if (!p)
+        {
+            cout << "  Товар с ID " << id << " не найден!" << endl;
+            return;
+        }
+        
+        cout << "Введите количество для продажи: ";
+        cin >> amount;
+        p->sell(amount);
+    }
+    
+    // Пополнение склада
+    void restockProduct()
+    {
+        int id, amount;
+        cout << "Введите ID товара: ";
+        cin >> id;
+        
+        Product* p = findById(id);
+        if (!p)
+        {
+            cout << "  Товар с ID " << id << " не найден!" << endl;
+            return;
+        }
+        
+        cout << "Введите количество для пополнения: ";
+        cin >> amount;
+        p->restock(amount);
+    }
+    
+    // Вывод всех товаров
+    void printAllProducts() const
+    {
+        if (products.empty())
+        {
+            cout << "\n  Склад пуст." << endl;
+            return;
+        }
+        
+        cout << "\n═══════════════════════════════════════════════════" << endl;
+        cout << "            ВСЕ ТОВАРЫ НА СКЛАДЕ" << endl;
+        cout << "═══════════════════════════════════════════════════" << endl;
+        for (const auto& p : products)
+        {
+            p->printInfo();
+            cout << endl;
+        }
+    }
+    
+    // Вывод бакалейных товаров
+    void printGroceries() const
+    {
+        if (groceriesList.empty())
+        {
+            cout << "\n  Бакалейные товары отсутствуют." << endl;
+            return;
+        }
+        
+        cout << "\n═══════════════════════════════════════════════════" << endl;
+        cout << "            БАКАЛЕЙНЫЕ ТОВАРЫ" << endl;
+        cout << "═══════════════════════════════════════════════════" << endl;
+        for (const auto& g : groceriesList)
+        {
+            g->printInfo();
+            cout << endl;
+        }
+    }
+    
+    // Вывод молочных продуктов
+    void printDairyProducts() const
+    {
+        if (dairyList.empty())
+        {
+            cout << "\n  Молочные продукты отсутствуют." << endl;
+            return;
+        }
+        
+        cout << "\n═══════════════════════════════════════════════════" << endl;
+        cout << "            МОЛОЧНЫЕ ПРОДУКТЫ" << endl;
+        cout << "═══════════════════════════════════════════════════" << endl;
+        for (const auto& d : dairyList)
+        {
+            d->printInfo();
+            cout << endl;
+        }
+    }
+    
+    // Применить скидку к бакалейному товару
+    void applyDiscountToGroceries()
+    {
+        int id;
+        double disc;
+        cout << "Введите ID бакалейного товара: ";
+        cin >> id;
+        
+        for (auto g : groceriesList)
+        {
+            if (g->getId() == id)
+            {
+                cout << "Введите размер скидки (0-90): ";
+                cin >> disc;
+                g->applyDiscount(disc);
+                return;
+            }
+        }
+        cout << "  Бакалейный товар с ID " << id << " не найден!" << endl;
+    }
+    
+    // Применить сезонную скидку
+    void applySeasonalDiscount()
+    {
+        int id;
+        double extra;
+        cout << "Введите ID бакалейного товара: ";
+        cin >> id;
+        
+        for (auto g : groceriesList)
+        {
+            if (g->getId() == id)
+            {
+                cout << "Введите дополнительную скидку (0-50): ";
+                cin >> extra;
+                g->applySeasonalDiscount(extra);
+                return;
+            }
+        }
+        cout << "  Бакалейный товар с ID " << id << " не найден!" << endl;
+    }
+    
+    // Применить уценку к молочному продукту
+    void applyMarkdownToDairy()
+    {
+        int id;
+        double percent;
+        cout << "Введите ID молочного продукта: ";
+        cin >> id;
+        
+        for (auto d : dairyList)
+        {
+            if (d->getId() == id)
+            {
+                cout << "Введите процент уценки (0-70): ";
+                cin >> percent;
+                d->applyMarkdown(percent);
+                return;
+            }
+        }
+        cout << "  Молочный продукт с ID " << id << " не найден!" << endl;
+    }
+    
+    // Списание просроченных товаров
+    void removeExpired()
+    {
+        cout << "\n═══════════════════════════════════════════════════" << endl;
+        cout << "         ПРОВЕРКА ПРОСРОЧЕННЫХ ТОВАРОВ" << endl;
+        cout << "═══════════════════════════════════════════════════" << endl;
+        
+        int removed = 0;
+        auto it = products.begin();
+        while (it != products.end())
+        {
+            Perishable* perish = dynamic_cast<Perishable*>(*it);
+            if (perish && perish->isExpired())
+            {
+                cout << "  Списание просроченного товара: " << (*it)->getName() << endl;
+                delete *it;
+                it = products.erase(it);
+                removed++;
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        
+        // Обновляем списки
+        groceriesList.clear();
+        dairyList.clear();
+        for (auto p : products)
+        {
+            Groceries* g = dynamic_cast<Groceries*>(p);
+            if (g) groceriesList.push_back(g);
+            
+            DairyProduct* d = dynamic_cast<DairyProduct*>(p);
+            if (d) dairyList.push_back(d);
+        }
+        
+        if (removed > 0)
+            cout << "\n  Списано " << removed << " просроченных товаров." << endl;
+        else
+            cout << "  Просроченных товаров не найдено." << endl;
+    }
+    
+    // Изменить цену товара
+    void changePrice()
+    {
+        int id;
+        double newPrice;
+        cout << "Введите ID товара: ";
+        cin >> id;
+        
+        Product* p = findById(id);
+        if (!p)
+        {
+            cout << "  Товар с ID " << id << " не найден!" << endl;
+            return;
+        }
+        
+        cout << "Введите новую цену: ";
+        cin >> newPrice;
+        p->setPrice(newPrice);
+        cout << "  Цена изменена!" << endl;
+    }
+    
+    // Изменить количество товара
+    void changeQuantity()
+    {
+        int id, newQuantity;
+        cout << "Введите ID товара: ";
+        cin >> id;
+        
+        Product* p = findById(id);
+        if (!p)
+        {
+            cout << "  Товар с ID " << id << " не найден!" << endl;
+            return;
+        }
+        
+        cout << "Введите новое количество: ";
+        cin >> newQuantity;
+        p->setQuantity(newQuantity);
+        cout << "  Количество изменено!" << endl;
+    }
+    
+    // Выявление расхождений между учетными данными и фактическими (ИНВЕНТАРИЗАЦИЯ)
+    void checkDiscrepancy()
+    {
+        cout << "\n═══════════════════════════════════════════════════" << endl;
+        cout << "         ИНВЕНТАРИЗАЦИЯ: ВЫЯВЛЕНИЕ РАСХОЖДЕНИЙ" << endl;
+        cout << "═══════════════════════════════════════════════════" << endl;
+        
+        if (products.empty())
+        {
+            cout << "  На складе нет товаров для инвентаризации." << endl;
+            return;
+        }
+        
+        int actualQuantity;
+        char confirm;
+        
+        for (auto p : products)
+        {
+            cout << "\nТовар: " << p->getName() << " (ID:" << p->getId() << ")" << endl;
+            cout << "  Учетное количество: " << p->getQuantity() << " шт." << endl;
+            cout << "  Введите фактическое количество при пересчете: ";
+            cin >> actualQuantity;
+            
+            if (actualQuantity != p->getQuantity())
+            {
+                cout << "    РАСХОЖДЕНИЕ: " << abs(actualQuantity - p->getQuantity()) 
+                     << " шт. (" << (actualQuantity > p->getQuantity() ? "излишек" : "недостача") << ")" << endl;
+                cout << "  Корректировать учет? (y/n): ";
+                cin >> confirm;
+                if (confirm == 'y' || confirm == 'Y')
+                {
+                    p->setQuantity(actualQuantity);
+                    cout << "    Учет скорректирован!" << endl;
+                }
+                else
+                {
+                    cout << "    Учет не скорректирован." << endl;
+                }
+            }
+            else
+            {
+                cout << "    Расхождений нет." << endl;
+            }
+        }
+        cout << "\n✓ Инвентаризация завершена!" << endl;
+    }
+};
+
+// ======================== ГЛАВНАЯ ФУНКЦИЯ С МЕНЮ ========================
+void showMenu()
+{
+    cout << "\n";
+    cout << "╔══════════════════════════════════════════════════════════╗" << endl;
+    cout << "║            СКЛАДСКОЙ УЧЕТ ПРОДУКТОВОГО МАГАЗИНА          ║" << endl;
+    cout << "╠══════════════════════════════════════════════════════════╣" << endl;
+    cout << "║  1. Добавить бакалейный товар                            ║" << endl;
+    cout << "║  2. Добавить молочный продукт                            ║" << endl;
+    cout << "║  3. Показать все товары                                  ║" << endl;
+    cout << "║  4. Показать бакалейные товары                           ║" << endl;
+    cout << "║  5. Показать молочные продукты                           ║" << endl;
+    cout << "║  6. Продажа товара                                       ║" << endl;
+    cout << "║  7. Пополнение склада                                    ║" << endl;
+    cout << "║  8. Применить скидку (бакалея)                           ║" << endl;
+    cout << "║  9. Применить сезонную скидку (бакалея)                  ║" << endl;
+    cout << "║ 10. Применить уценку (молочные)                          ║" << endl;
+    cout << "║ 11. Списать просроченные товары                          ║" << endl;
+    cout << "║ 12. Изменить цену товара                                 ║" << endl;
+    cout << "║ 13. Изменить количество товара                           ║" << endl;
+    cout << "║ 14. Инвентаризация (выявление расхождений)               ║" << endl;
+    cout << "║  0. Выход                                                ║" << endl;
+    cout << "╚══════════════════════════════════════════════════════════╝" << endl;
+    cout << "Ваш выбор: ";
+}
+
+int main()
+{
+    
+    
+    Warehouse myWarehouse;
+    int choice;
+    
+    // Добавим несколько товаров для примера
+    cout << "=== ДОБАВЛЕНИЕ НАЧАЛЬНЫХ ТОВАРОВ ДЛЯ ПРИМЕРА ===" << endl;
+    
+    Groceries* pasta = new Groceries("Макароны Барти", 89.90, 50, "31.12.2025", 0, "Картон", "Макароны");
+    Groceries* cookies = new Groceries("Печенье Юбилейное", 45.50, 30, "15.08.2025", 10, "Пакет", "Кондитерка");
+    DairyProduct* milk = new DairyProduct("Молоко Домик", 79.90, 20, "20.06.2026", 3.2, "Вкуснотеево");
+    
+    myWarehouse.addProduct(pasta);
+    myWarehouse.addProduct(cookies);
+    myWarehouse.addProduct(milk);
+    
+    cout << "\n  Начальные товары загружены! Вы можете добавлять новые." << endl;
+    
+    do
+    {
+        showMenu();
+        cin >> choice;
+        
+        switch (choice)
+        {
+            case 1:
+                cout << "\n--- ДОБАВЛЕНИЕ БАКАЛЕЙНОГО ТОВАРА ---" << endl;
+                myWarehouse.addGroceries();
+                break;
+                
+            case 2:
+                cout << "\n--- ДОБАВЛЕНИЕ МОЛОЧНОГО ПРОДУКТА ---" << endl;
+                myWarehouse.addDairyProduct();
+                break;
+                
+            case 3:
+                myWarehouse.printAllProducts();
+                break;
+                
+            case 4:
+                myWarehouse.printGroceries();
+                break;
+                
+            case 5:
+                myWarehouse.printDairyProducts();
+                break;
+                
+            case 6:
+                cout << "\n--- ПРОДАЖА ТОВАРА ---" << endl;
+                myWarehouse.sellProduct();
+                break;
+                
+            case 7:
+                cout << "\n--- ПОПОЛНЕНИЕ СКЛАДА ---" << endl;
+                myWarehouse.restockProduct();
+                break;
+                
+            case 8:
+                cout << "\n--- ПРИМЕНЕНИЕ СКИДКИ (БАКАЛЕЯ) ---" << endl;
+                myWarehouse.applyDiscountToGroceries();
+                break;
+                
+            case 9:
+                cout << "\n--- ПРИМЕНЕНИЕ СЕЗОННОЙ СКИДКИ (БАКАЛЕЯ) ---" << endl;
+                myWarehouse.applySeasonalDiscount();
+                break;
+                
+            case 10:
+                cout << "\n--- ПРИМЕНЕНИЕ УЦЕНКИ (МОЛОЧНЫЕ) ---" << endl;
+                myWarehouse.applyMarkdownToDairy();
+                break;
+                
+            case 11:
+                myWarehouse.removeExpired();
+                break;
+                
+            case 12:
+                cout << "\n--- ИЗМЕНЕНИЕ ЦЕНЫ ---" << endl;
+                myWarehouse.changePrice();
+                break;
+                
+            case 13:
+                cout << "\n--- ИЗМЕНЕНИЕ КОЛИЧЕСТВА ---" << endl;
+                myWarehouse.changeQuantity();
+                break;
+                
+            case 14:
+                cout << "\n--- ИНВЕНТАРИЗАЦИЯ ---" << endl;
+                myWarehouse.checkDiscrepancy();
+                break;
+                
+            case 0:
+                cout << "\nЗавершение работы программы..." << endl;
+                break;
+                
+            default:
+                cout << "\n  Неверный выбор! Попробуйте снова." << endl;
+                break;
+        }
+        
+    } while (choice != 0);
+    
+    cout << "\nПрограмма завершена. Спасибо за использование!" << endl;
+    
+    return 0;
+}
